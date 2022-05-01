@@ -4,7 +4,8 @@ library(ggplot2)
 library(dplyr)
 library(tidyverse)
 library(colourpicker)
-library(DT)# you might need to install this.
+library(DT)
+library(ComplexHeatmap)
 
 
 # Define UI for application that draws a histogram
@@ -38,7 +39,7 @@ ui <- fluidPage(
                  sidebarLayout(
                      sidebarPanel(fileInput("count_file", "Input Count Data (csv)", accept = ".csv"),
                                    sliderInput("var_slider", min = 0, max = 100,
-                                               label ="Percent Variance", value = 0, step = 5),
+                                               label ="Percent Variance", value = 75, step = 5),
                                    sliderInput("zero_slider", min = 1, max = 50,
                                                label ="Zeros", value = 50, step = 1)
                                ),
@@ -50,20 +51,33 @@ ui <- fluidPage(
                                   plotOutput("med_vs_var"),
                                   plotOutput("med_vs_zero")),
                          tabPanel("Heatmap", fluid=TRUE,
-                                  plotOutput("heatmap")),
+                                  sidebarLayout(
+                                      sidebarPanel(
+                                          radioButtons(
+                                              "logT",
+                                              "Log Transformation?",
+                                              choices = c("False", "True"),
+                                              inline = T
+                                          )
+                                      ),
+                                      mainPanel(plotOutput("heatmap"))
+                                  )),
                          tabPanel("PCA", fluid=TRUE,
                                   sidebarLayout(
                                       sidebarPanel(
                                           radioButtons(
-                                              "X",
+                                              "PC1",
                                               "Select PC",
-                                              choices = c("PC1", "PC2", "PC3", "PC4"),
+                                              choices = c("1", "2", "3", "4",
+                                                          "5", "6"),
                                               inline = T
                                           ),
                                           radioButtons(
-                                              "Y",
+                                              "PC2",
                                               "Select PC",
-                                              choices = c("PC1", "PC2", "PC3", "PC4"),
+                                              choices = c("1", "2", "3", "4",
+                                                          "5", "6"),
+                                              selected = "2",
                                               inline = T
                                           )
                                       ),
@@ -206,7 +220,7 @@ server <- function(input, output, session) {
             ggplot(aes(x = log(median+1), y = log(variance), colour = variance<thresh)) +
             geom_point(stat = "identity", show.legend = FALSE) +
             scale_colour_manual(values = c("black", "grey")) +
-            ylab("Number of Zeros") +
+            ylab("Variance") +
             xlab("log(Median+1)") +
             ggtitle("log(Median Norm Counts) vs log(Variance Norm Counts)")+
             theme_minimal()
@@ -221,12 +235,61 @@ server <- function(input, output, session) {
             theme_minimal()
         
         return(list(plot1, plot2))
-        
     }
     
-    
-    
+    heatmap_f <- function(data, thresh, zeros_n, logT){
+        filter_df <- filter_data(data, thresh, zeros_n)
         
+        plotData <- as.matrix(filter_df)
+        
+        if(logT == "False"){
+            h <- Heatmap(plotData, name = 'Counts', cluster_rows = FALSE,
+                         column_gap = unit(0, "mm"), 
+                         show_row_names = FALSE, show_column_names = FALSE, 
+                         border = TRUE)
+        }else{
+            log_plot_data <- log(plotData+1)
+            
+            h <- Heatmap(log_plot_data, name = 'log(Counts)', cluster_rows = FALSE,
+                         column_gap = unit(0, "mm"), 
+                         show_row_names = FALSE, show_column_names = FALSE, 
+                         border = TRUE)
+            
+        }
+        return(h)
+    }
+    
+    PCA <- function(data, thresh, zeros_n, X, Y){
+        X_val <- as.integer(X)
+        Y_val <- as.integer(Y)
+        
+        filter_df <- filter_data(data, thresh, zeros_n)
+        pca_results <- prcomp(filter_df)
+        #add metadata to pca output for access while plotting
+        pca_data <- as.data.frame(pca_results$x)
+        #calculate percent variances for each PC
+        variances <- sapply(pca_results$sdev, function(x) x^2 )
+        perc_variances <- sapply(variances, function(x) x/sum(variances))
+        
+        #generate x and y labels
+        PC1_var <- as.character(round(perc_variances[X_val]*100))
+        PC2_var <- as.character(round(perc_variances[Y_val]*100))
+        
+        y_label <- str_c("PC", Y, ": ", PC2_var, "% variance")
+        x_label <- str_c("PC", X, ": ", PC1_var, "% variance")
+        #plot PC1 and 2 using ggplot
+        
+        pc1 <- str_c("PC", X)
+        pc2 <- str_c("PC", Y)
+        plot <- pca_data %>%
+            ggplot(aes(x=as.numeric(!!sym(pc1)), y=as.numeric(!!sym(pc2))))+
+            geom_point(stat="identity")+
+            xlab(x_label)+
+            ylab(y_label) +
+            theme_minimal()
+        
+        return(plot)
+    }
     
     
     #Output
@@ -254,6 +317,18 @@ server <- function(input, output, session) {
     output$med_vs_zero <- renderPlot({scatter_plot(load_counts(),
                                                   input$var_slider,
                                                   input$zero_slider)[2]})
+    
+    
+    output$heatmap<-renderPlot({heatmap_f(load_counts(),
+                                          input$var_slider,
+                                          input$zero_slider,
+                                          logT=input$logT)})
+    
+    output$PCA <- renderPlot({PCA(load_counts(),
+                                  input$var_slider,
+                                  input$zero_slider,
+                                  input$PC1,
+                                  input$PC2)})
 }
 
 # Run the application
