@@ -41,9 +41,16 @@ ui <- fluidPage(
                  sidebarLayout(
                      sidebarPanel(fileInput("count_file", "Input Count Data (csv)", accept = ".csv"),
                                    sliderInput("var_slider", min = 0, max = 100,
-                                               label ="Percent Variance", value = 75, step = 5),
-                                   sliderInput("zero_slider", min = 1, max = 50,
-                                               label ="Zeros", value = 50, step = 1)
+                                               label ="Percent Variance", value = 50, step = 1),
+                                   sliderInput("zero_slider", min = 1, max = 100,
+                                               label ="Allowed Zeros Counts per Gene", 
+                                               value = 100, step = 1),
+                                  radioButtons(
+                                      "logT",
+                                      "Log Transformation for Heatmap:",
+                                      choices = c("False", "True"),
+                                      inline = T
+                                  )
                                ),
                  mainPanel(
                      tabsetPanel(
@@ -53,17 +60,8 @@ ui <- fluidPage(
                                   plotOutput("med_vs_var"),
                                   plotOutput("med_vs_zero")),
                          tabPanel("Heatmap", fluid=TRUE,
-                                  sidebarLayout(
-                                      sidebarPanel(
-                                          radioButtons(
-                                              "logT",
-                                              "Log Transformation?",
-                                              choices = c("False", "True"),
-                                              inline = T
-                                          )
-                                      ),
-                                      mainPanel(plotOutput("heatmap"))
-                                  )),
+                                  plotOutput("heatmap")
+                                  ),
                          tabPanel("PCA", fluid=TRUE,
                                   sidebarLayout(
                                       sidebarPanel(
@@ -99,24 +97,28 @@ ui <- fluidPage(
                                   
                      ),
                      mainPanel(
-                         sidebarLayout(
-                             sidebarPanel(
-                                 radioButtons("var_x", "X Variable", 
-                                              c("log2FoldChange", "stat", "lfcSE", "padj", "pvalue")),
-                                 radioButtons("var_y", "Y Variable",
-                                              c("padj", "pvalue", "log2FoldChange", "stat", "lfcSE")),
-                                 sliderInput("slider", min = -300, max = 0,
-                                             label ="significance", value = -100, step = 10),
-                                 colourInput("nonSig", "Select Color 1", value = "black",
-                                             showColour = "text"),
-                                 colourInput("sig", "Select Color 2", value = "red",
-                                             showColour = "text")
-                             ),
-                             mainPanel(
-                                 tabsetPanel(
-                                     tabPanel("Volcano Plot", plotOutput("volcano")),
-                                     tabPanel("Table", tableOutput("de_table"))
-                                 )))))),
+                         tabsetPanel(
+                             tabPanel("DE Data", 
+                                      DT::dataTableOutput("DE_table")),
+                             tabPanel("DE Analysis",
+                                      sidebarLayout(
+                                          sidebarPanel(
+                                              radioButtons("var_x", "X Variable", 
+                                                           c("log2FoldChange", "stat", "lfcSE", "padj", "pvalue")),
+                                              radioButtons("var_y", "Y Variable",
+                                                           c("padj", "pvalue", "log2FoldChange", "stat", "lfcSE")),
+                                              sliderInput("slider", min = -150, max = 0,
+                                                           label ="significance", value = -50, step = 5),
+                                              colourInput("nonSig", "Select Color 1", value = "black",
+                                                           showColour = "text"),
+                                              colourInput("sig", "Select Color 2", value = "red",
+                                                           showColour = "text")
+                                          ),
+                                          mainPanel(
+                                              tabsetPanel(
+                                                  tabPanel("Volcano Plot", plotOutput("volcano")),
+                                                  tabPanel("Table", DT::dataTableOutput("de_table"))
+                                 )))))))),
         tabPanel("Correlation Network Analysis",fluid = TRUE,
                  sidebarLayout(
                      sidebarPanel(fileInput("cor_file", "Input Norm Counts (csv)", 
@@ -126,21 +128,127 @@ ui <- fluidPage(
                                   actionButton("runCor", 
                                                "Perform Correlation Analysis"),
                                   sliderInput("cor_slider", min = 0, max = 1,
-                                              label ="correlation", value = 0.5, step = 0.1)),
+                                              label ="correlation", value = 0.5, step = 0.05),
+                                  verbatimTextOutput("b_genes")),
                      mainPanel(
                          tabsetPanel(
                              tabPanel("Heatmap", plotOutput("cor_hm")),
                              tabPanel("Correlation Graph", plotOutput("cor_graph")),
                              tabPanel("Metrics", tableOutput("cor_metrics"))
-                         ))))
+                         )))),
+        
+        tabPanel("Help Page", fluid = T,
+                 mainPanel(
+                     h2("Sample Tab"),
+                     h3("Data Input"),
+                     p("- The expected input for this section of the shiny app is
+                       an associated meta data file. The rows are expected to be 
+                       samples and the columns are variables describing the data. There
+                       are not expectations for the contents of this meta data file.
+                       Although, if the users wishes to perform DESeq2 through the 
+                       shiny app then there weill need to be atleast one column 
+                       that can be used to separate the samples into groups for
+                       the anlysis (a design parameter to give to DESeq). Lastly,
+                       the input must be in csv format."),
+                     br(),
+                     h3("Tabs"),
+                     p("- The sample tab allows users to get a high level analysis
+                       of any meta data associated with their sequencing data. The
+                       expected input is a csv file with rows as the samples and
+                       columns the different variables."), 
+                     p("- The first tab will generate a table summarizing the contents
+                       of each column in the meta data. "),
+                     p("- The table tab generates a data table that allows users
+                       to sort by specific columns and search the table."),
+                     p("- The plot tab will allow the user to generate histograms
+                       for some of the data from the meta data. These columns are
+                       chosen based on the number of unique values in that column.
+                       If a column has too many unique values (equal to the number 
+                       of samples) or too little unique values then it is not 
+                       included as an option."),
+                     br(),
+                     br(),
+                     hr(),
+                     h2("Counts Tab"),
+                     h3("Data Input"),
+                     p("- Similarly to the sample input, here the app expects a
+                       csv file, but with the rows as genes and the columns as 
+                       samples. The counts data shouldn't consist of any character
+                       values and should only consist of numeric values. "),
+                     br(),
+                     h3("Tabs"),
+                     p("- The summary tab for the counts section generates a table 
+                       that tells the user high level information about the count
+                       file they uploaded. Specifically, it allows them to see what
+                       affect the filters they are applying through the corresponding
+                       sliders is having on their data. i.e what percent of genes
+                       in the counts file is passing and not passing the applied
+                       filters."),
+                     p("- The scatter plot tab generates two plots from the input
+                       counts file. Both are scatter plots; the first shows the
+                       variance vs the median counts and the second plot shows the number
+                       of samples with zero counts for a gene vs the median counts. 
+                       Genes that pass the applied filters are black, and those that 
+                       do not are a light grey. The figures are reactive to changes
+                       in filter values."),
+                     p("- The next tab generates a heatmap clustering samples based
+                       on the count data that is passing the applied filters. There
+                       is also an option to apply a log transformation to the data
+                       prior to generating the heatmap."),
+                     p("- The PCA tab allows users to perform principle component
+                       analysis on the counts that passed the applied filter. 
+                       Users have the option to select from the first 5 principle
+                       components for the x and y axis. "),
+                     br(),
+                     br(),
+                     hr(),
+                     h2("Differential Expression Tab"),
+                     h3("Data Input"),
+                     p("- For this input the expectations of the rows and, more
+                       specifically, column variables is more stringent. The file
+                       should have a log 2 Fold change column, p-value column, 
+                       p-value adjusted column, log fold change standard error coloum,
+                       and a statistic column. The expected names for these
+                       columns are log2FoldChange, pvalue, padj, lfcSE, and stat
+                       respectively. This is the exact output from DESeq2 currently,
+                       and is what will be generated if the user instead chooses to
+                       generate the DE results with the uploaded counts and sample
+                       data files."),
+                     br(),
+                     h3("Tabs"),
+                     p("- The first tab generates a scatter plot of the log2 Fold
+                       Change values, and colors points based on whether or not
+                       they pass the signficance threshold applied in the slider
+                       on the side of the tab."),
+                     p("- The table tab generates a table with DE results for 
+                       genes that passed the significance threshold."),
+                     br(),
+                     br(),
+                     hr(),
+                     h2("Correlation Analysis Tab"),
+                     h3("Data Input"),
+                     p("- For this tab users input the same counts file tab, or
+                       a different tab following the description in the counts
+                       tab data input description. Additionally, users can 
+                       specify there genes of interest in generating the correlation
+                       analysis results. The analysis can not be run without specifying
+                       genes of interest. For this text input each gene is on a 
+                       different line in the input box."),
+                     h3("Tabs"),
+                     p("- Generates a heatmap clustering samples based on the expression
+                       for the genes specified. "),
+                     p("- Takes the genes specified in the text input, and generates
+                       a correlation matrix to be used for creating a correlation
+                       network graph."),
+                     p("- Pulls closeness, degree, and betweeness values from the 
+                       network and presents them in a table."),
+                     br(),
+                     br()
+                 ))
         
         
     )
 )
-                        
-        
-
-
                         
 # Define server logic required to draw a histogram
 server <- function(input, output, session) {
@@ -173,6 +281,7 @@ server <- function(input, output, session) {
         
         type <- class(x)
         value = ""
+        sample_n <- length(x)
         
         if(type=="numeric"||type=="integer"){
             av <- as.character(format(round(mean(na.omit(x)), 2), nsmall = 2))
@@ -181,7 +290,11 @@ server <- function(input, output, session) {
         }
         if(type=="character"){
             value <- unique(x)
-            value <- str_c(value, collapse=", ")
+            if(length(value)==sample_n){
+                value = "Identifier"
+            }else{
+                value <- str_c(value, collapse=", ")
+            }
         }
         return(list(type, value))
     }
@@ -195,8 +308,7 @@ server <- function(input, output, session) {
         values <- as.data.frame(values)
         
         dataf <- as.data.frame(t(rbind(types, values)))
-        dataf <- dataf %>%
-            filter(nchar(V2)<50)
+        
         colnames(dataf) <- c("Type", "Mean (sd) or Distinct Values")
         dataf <- tibble::rownames_to_column(dataf, "Column Names")
         
@@ -205,7 +317,8 @@ server <- function(input, output, session) {
     
     get_radio_names <- function(dataf){
         dataf <- dataf %>%
-            select_if(function(x) is.integer(x) || is.numeric(x))
+            select_if(function(x) is.integer(x) || is.numeric(x)) %>%
+            select_if(function(x) length(unique(x)) < (0.9 * nrow(dataf)) & length(unique(x)) > 2)
         names <- colnames(dataf)
         return(names)
     }
@@ -306,14 +419,14 @@ server <- function(input, output, session) {
         if(logT == "False"){
             h <- Heatmap(plotData, name = 'Counts', cluster_rows = FALSE,
                          column_gap = unit(0, "mm"), 
-                         show_row_names = FALSE, show_column_names = FALSE, 
+                         show_row_names = FALSE, 
                          border = TRUE)
         }else{
             log_plot_data <- log(plotData+1)
             
             h <- Heatmap(log_plot_data, name = 'log(Counts)', cluster_rows = FALSE,
                          column_gap = unit(0, "mm"), 
-                         show_row_names = FALSE, show_column_names = FALSE, 
+                         show_row_names = FALSE, #show_column_names = FALSE, 
                          border = TRUE)
             
         }
@@ -370,7 +483,8 @@ server <- function(input, output, session) {
     
     get_de_names <- function(dataf){
         dataf <- dataf %>%
-            select_if(function(x) is.character(x))
+            select_if(function(x) is.character(x)) %>%
+            select_if(function(x) length(unique(x)) < 5 & length(unique(x)) > 1)
         names <- colnames(dataf)
         return(names)
     }
@@ -450,6 +564,10 @@ server <- function(input, output, session) {
     filter_cor <- function(data, genes){
         genes <- strsplit(genes, "\n")
         genes <- genes[[1]]
+        
+        genes <- intersect(genes, rownames(data))
+        genes <- unlist(genes)
+    
         data <- data[genes,]
         
         return(data)
@@ -459,9 +577,9 @@ server <- function(input, output, session) {
         data_s <- filter_cor(data, genes)
         plotData <- as.matrix(data_s)
         
-        h <- Heatmap(plotData, name = 'Counts', cluster_rows = FALSE,
+        h <- Heatmap(log(plotData+1), name = 'log(counts)', cluster_rows = FALSE,
                     column_gap = unit(0, "mm"), 
-                    show_row_names = FALSE, show_column_names = FALSE, 
+                    #show_row_names = FALSE, show_column_names = FALSE, 
                     border = TRUE)
         
         return(h)
@@ -469,6 +587,7 @@ server <- function(input, output, session) {
     
     corr_network <- function(data, thresh, genes){
         data <- filter_cor(data, genes)
+        
         mat <- cor(t(data))
         
         mat[mat<thresh] <- 0
@@ -476,16 +595,54 @@ server <- function(input, output, session) {
         # Make an Igraph object from this matrix:
         network <- graph_from_adjacency_matrix( mat, weighted=T, 
                                                 mode="undirected", diag=F)
-        
         # Basic chart
-        plot <- plot(network)
+        plot <- plot(network,
+                     vertex.size=18,
+                     vertex.color="lightblue",
+                     vertex.label.cex = 1,
+                     vertex.label.dist = 2,
+                     vertex.label.color = "black")
         
-        stats <- data.frame(degree = degree(network),
+        genes <- strsplit(genes, "\n")
+        genes <- genes[[1]]
+        genes <- intersect(genes, rownames(data))
+        
+        stats <- data.frame(genes = genes,
+                            degree = degree(network),
                             closeness = closeness(network),
                             betweenness = betweenness(network))
         
         return(list(plot, stats))
         
+    }
+    
+    find_genes <- function(data, gene){
+        
+        if(gene %in% rownames(data)){
+        }
+        else{
+            return(gene)
+        }
+        
+    }
+    
+    bad_genes <- function(data, genes){
+        
+        genes <- strsplit(genes, "\n")
+        genes <- genes[[1]]
+        
+        b_genes <- lapply(genes, function(x){find_genes(data, x)})
+        
+        b_genes <- b_genes %>% 
+            discard(is.null)
+        
+        if(length(b_genes)>0){
+            b_genes <- str_c(b_genes, collapse=", ")
+            return(str_c("Genes not in data: ", b_genes))
+        }
+        else{
+            return("")
+        }
     }
     
     
@@ -533,6 +690,10 @@ server <- function(input, output, session) {
     observeEvent(input$runDE,{
         DESeq_result <- run_deseq(load_counts(), load_data(), input$de_var)
         
+        output$DE_table <- DT::renderDataTable(DESeq_result,
+                                               options = list(scrollX = TRUE),
+                                               rownames = TRUE)
+        
         output$volcano <- renderPlot({volcano_plot(DESeq_result, 
                                                    input$var_x, 
                                                    input$var_y,
@@ -541,11 +702,17 @@ server <- function(input, output, session) {
                                                    input$sig)
         })
         
-        output$de_table <- renderTable({draw_table(DESeq_result, input$slider)},
-                                    bordered = T) 
+        output$de_table <- DT::renderDataTable(draw_table(DESeq_result, input$slider),
+                                               options = list(scrollX = TRUE),
+                                               rownames = TRUE)
+        
         
         
     })
+    
+    output$DE_table <- DT::renderDataTable(load_de(),
+                                           options = list(scrollX = TRUE),
+                                           rownames = TRUE)
     
     output$volcano <- renderPlot({volcano_plot(load_de(), 
                                                input$var_x, 
@@ -555,19 +722,26 @@ server <- function(input, output, session) {
                                                input$sig)
     })
     
-    output$de_table <- renderTable({draw_table(load_de(), input$slider)},
-                                bordered = T) 
+    output$de_table <- output$de_table <- DT::renderDataTable(draw_table(load_de(), input$slider),
+                                                              options = list(scrollX = TRUE),
+                                                              rownames = TRUE)
     
     #Correlation
     
     observeEvent(input$runCor, {
+        
+        output$b_genes <- renderText({bad_genes(load_cor(),
+                                                input$cor_genes)})
+        
         output$cor_hm <- renderPlot({heatmap_cor(load_cor(),
                                                 input$cor_genes)
             })
     
         output$cor_graph <- renderPlot({corr_network(load_cor(),
                                                     input$cor_slider,
-                                                    input$cor_genes)[1]})
+                                                    input$cor_genes)[1]},
+                                       width = 750,
+                                       height = 750)
     
         output$cor_metrics <- renderTable({corr_network(load_cor(),
                                                         input$cor_slider,
