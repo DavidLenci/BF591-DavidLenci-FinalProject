@@ -1,4 +1,3 @@
-# Welcome to R Shiny. All that glitters is not gold.
 library(shiny)
 library(ggplot2)
 library(dplyr)
@@ -10,9 +9,8 @@ library(DESeq2)
 library(igraph)
 
 
-# Define UI for application that draws a histogram
 ui <- fluidPage(
-    titlePanel("BF591 Final Project Spring 2022"),
+    titlePanel("BF591 Final Project Spring 2022 - RNA-Seq Analysis"),
     tabsetPanel(
         tabPanel("Sample", fluid = TRUE,
             sidebarLayout(
@@ -41,7 +39,7 @@ ui <- fluidPage(
                  sidebarLayout(
                      sidebarPanel(fileInput("count_file", "Input Count Data (csv)", accept = ".csv"),
                                    sliderInput("var_slider", min = 0, max = 100,
-                                               label ="Percent Variance", value = 50, step = 1),
+                                               label ="Percent Variance Treshold", value = 50, step = 1),
                                    sliderInput("zero_slider", min = 1, max = 100,
                                                label ="Allowed Zeros Counts per Gene", 
                                                value = 100, step = 1),
@@ -88,6 +86,7 @@ ui <- fluidPage(
                      sidebarPanel(fileInput("de_file", "Input DE Results (csv)", accept = ".csv"),
                                   hr(),
                                   actionButton("runDE", "Perform DE Using Norm Counts"),
+                                  br(),
                                   radioButtons(
                                       "de_var",
                                       "Select Variable for DE",
@@ -127,8 +126,9 @@ ui <- fluidPage(
                                                 width = "1000px"),
                                   actionButton("runCor", 
                                                "Perform Correlation Analysis"),
+                                  br(),
                                   sliderInput("cor_slider", min = 0, max = 1,
-                                              label ="correlation", value = 0.5, step = 0.05),
+                                              label ="Correlation Treshold", value = 0.5, step = 0.05),
                                   verbatimTextOutput("b_genes")),
                      mainPanel(
                          tabsetPanel(
@@ -252,10 +252,15 @@ ui <- fluidPage(
                         
 # Define server logic required to draw a histogram
 server <- function(input, output, session) {
-    options(shiny.maxRequestSize=30*1024^2)
+    options(shiny.maxRequestSize=30*1024^2) #allow for large files
     #Samples
     #-------------------------------------------------------------------------->
-    load_data <- eventReactive(input$sample_file, {
+    #' 
+    #' @param input_csv
+    #' 
+    #' @return dataframe
+    #' 
+    load_data <- eventReactive(input$sample_file, { #sample input
         
         if(!is.null(input$sample_file$datapath)){
             data <- read.csv(input$sample_file$datapath,
@@ -264,19 +269,25 @@ server <- function(input, output, session) {
             return(NULL)
         }
         
+        #observe sample data and generate radio button names
         if(!is.null(data)){
-            observe({
-                vchoices <- get_radio_names(data)
+            observe({ #for histogram
+                vchoices <- get_radio_names(data) 
                 updateRadioButtons(session, "var", choices = vchoices)
             })
             
-            observe({
+            observe({ #buttons for DE
                 dechoices <- get_de_names(data)
                 updateRadioButtons(session, "de_var", choices = dechoices)
             })
             return(data)
         }
     })
+    
+    #' helper function for generating summary table
+    #' 
+    #' @input: vector
+    #' 
     helper <- function(x){
         
         type <- class(x)
@@ -299,6 +310,14 @@ server <- function(input, output, session) {
         return(list(type, value))
     }
     
+    #' Generate summary table for first tab. For each column determine the type of
+    #' information in the column. If numeric calculate mean and sd, otherwise
+    #' get unique values.
+    #' 
+    #' @param dataframe
+    #' 
+    #' @return Summary df
+    #' 
     summary_tb <- function(df_in){
         df <- df_in
         types <- lapply(df, function(x){helper(x)[[1]]})
@@ -315,6 +334,12 @@ server <- function(input, output, session) {
         return(dataf)
     }
     
+    #' Get radio names to be used in creating histogram.
+    #' 
+    #' @param df
+    #' 
+    #' @return vector of names
+    #' 
     get_radio_names <- function(dataf){
         dataf <- dataf %>%
             select_if(function(x) is.integer(x) || is.numeric(x)) %>%
@@ -323,17 +348,30 @@ server <- function(input, output, session) {
         return(names)
     }
     
+    #' generate histogram given dataframe and a variable of interest
+    #' 
+    #' @param df
+    #' @param variable_for_plot
+    #' 
+    #' @return ggplot hist
+    #' 
     sample_histogram <- function(dataf, var) {
         #clean data
         plot <- dataf %>%
             ggplot(aes(x=!!sym(var))) + 
-            geom_histogram(stat="count") +
+            geom_histogram(stat="count", fill = "lightblue", color = "black") +
             theme_bw()
         return(plot)
     }
     #counts
     #-------------------------------------------------------------------------->
     
+    #' read in count data
+    #' 
+    #' @param input_file
+    #' 
+    #' @return df
+    #' 
     load_counts <- eventReactive(input$count_file, {
         
         if(!is.null(input$count_file$datapath)){
@@ -347,6 +385,14 @@ server <- function(input, output, session) {
         }
     })
     
+    #' filter data according to percentile of variance and number of zeros
+    #' 
+    #' @param dataframe
+    #' @param thresholdvalue
+    #' @param zero_count
+    #' 
+    #' @return dataframe filtered
+    #' 
     filter_data <- function(data, thresh, zeros){
         thresh <- thresh/100
         variances <- apply(data, 1, var)
@@ -358,6 +404,14 @@ server <- function(input, output, session) {
         return(data)
     }
     
+    #' generate summary table for input counts file
+    #' 
+    #' @param dataframe
+    #' @param threshold
+    #' @param allowedzeros
+    #' 
+    #' @return summary df
+    #' 
     summary_counts <- function(data, thresh, zeros){
         filter <- filter_data(data, thresh, zeros)
         #filter/get final dims
@@ -378,6 +432,15 @@ server <- function(input, output, session) {
         return(summary)
     }
     
+    #' generate scatter plots of norm counts data after being filtered. 
+    #' color datapoints dependent on if they pass the filter.
+    #' 
+    #' @param dataframe
+    #' @param threshold
+    #' @param allowedzeros
+    #' 
+    #' @return scatter plots
+    #' 
     scatter_plot <- function(data, thresh, zeros_n){
         thresh <- thresh/100
         variances <- apply(data, 1, var)
@@ -411,6 +474,14 @@ server <- function(input, output, session) {
         return(list(plot1, plot2))
     }
     
+    #' generate clustered heatmap of sample file and filtered count data
+    #' 
+    #' @param dataframe
+    #' @param threshold
+    #' @param allowedzeros
+    #' 
+    #' @return heatmap
+    #' 
     heatmap_f <- function(data, thresh, zeros_n, logT){
         filter_df <- filter_data(data, thresh, zeros_n)
         
@@ -433,6 +504,14 @@ server <- function(input, output, session) {
         return(h)
     }
     
+    #' perform pca and generate scatter plot using filtered dataframe
+    #' 
+    #' @param dataframe
+    #' @param threshold
+    #' @param allowedzeros
+    #' 
+    #' @return PCA scatter plot
+    #' 
     PCA <- function(data, thresh, zeros_n, X, Y){
         X_val <- as.integer(X)
         Y_val <- as.integer(Y)
@@ -468,6 +547,12 @@ server <- function(input, output, session) {
     #DE
     #-------------------------------------------------------------------------->
     
+    #' read in DE csv data
+    #' 
+    #' @param input_path
+    #' 
+    #' @return dataframe
+    #' 
     load_de <- eventReactive(input$de_file, {
         
         if(!is.null(input$de_file$datapath)){
@@ -481,6 +566,11 @@ server <- function(input, output, session) {
         }
     })
     
+    #' get names to be used for running DESeq2. design parameter
+    #' 
+    #' @param dataframe
+    #' 
+    #' @return genes
     get_de_names <- function(dataf){
         dataf <- dataf %>%
             select_if(function(x) is.character(x)) %>%
@@ -489,6 +579,14 @@ server <- function(input, output, session) {
         return(names)
     }
     
+    #' run DESeq2 analysis
+    #' 
+    #' @param counts
+    #' @param metadata
+    #' @param design
+    #' 
+    #' @return DESeq2_results
+    #' 
     run_deseq <- function(count_dataframe, meta, condition){
         
         samples <- colnames(count_dataframe)
@@ -512,7 +610,17 @@ server <- function(input, output, session) {
         return(res)
     }
     
-    
+    #' Generate volcano plot from DE results
+    #' 
+    #' @param dataframe
+    #' @param x_var
+    #' @param y_var
+    #' @param significance
+    #' @param color_string
+    #' @param color_string
+    #' 
+    #' @return scatter_plot
+    #' 
     volcano_plot <-
         function(dataf, x_name, y_name, slider, color1, color2) {
             #clean data
@@ -532,6 +640,13 @@ server <- function(input, output, session) {
             return(plot)
         }
     
+    #' generate table of significantly DE genes
+    #' 
+    #' @param dataframe
+    #' @param significance
+    #' 
+    #' @return dataframe
+    #' 
     draw_table <- function(dataf, slider) {
         #clean data
         dataf <- dataf %>%
@@ -547,7 +662,12 @@ server <- function(input, output, session) {
     
     #Correlation Plot
     #-------------------------------------------------------------------------->
-    
+    #' load in norm counts data
+    #' 
+    #' @param input_file
+    #' 
+    #' @return dataframe
+    #' 
     load_cor <- eventReactive(input$cor_file,{
         
         if(!is.null(input$cor_file$datapath)){
@@ -561,6 +681,13 @@ server <- function(input, output, session) {
         }
     })
     
+    #' filter counts data
+    #' 
+    #' @param dataframe
+    #' @param string
+    #' 
+    #' @return dataframe filtered
+    
     filter_cor <- function(data, genes){
         genes <- strsplit(genes, "\n")
         genes <- genes[[1]]
@@ -573,6 +700,13 @@ server <- function(input, output, session) {
         return(data)
     }
     
+    #' generate heatmap
+    #' 
+    #' @param dataframe
+    #' @param genes_string
+    #' 
+    #' @return heatmap plot
+    #' 
     heatmap_cor <- function(data, genes){
         data_s <- filter_cor(data, genes)
         plotData <- as.matrix(data_s)
@@ -585,6 +719,14 @@ server <- function(input, output, session) {
         return(h)
     }
     
+    #' create correlation network
+    #' 
+    #' @param dataframe
+    #' @param threshold
+    #' @param genes_string
+    #' 
+    #' @return network
+    #' 
     corr_network <- function(data, thresh, genes){
         data <- filter_cor(data, genes)
         
@@ -616,6 +758,13 @@ server <- function(input, output, session) {
         
     }
     
+    #' find genes not in dataframe
+    #' 
+    #' @param dataframe
+    #' @param gene_string
+    #' 
+    #' @return vector of genes not in dataframe
+    #' 
     find_genes <- function(data, gene){
         
         if(gene %in% rownames(data)){
@@ -626,6 +775,13 @@ server <- function(input, output, session) {
         
     }
     
+    #' identify genes not in dataframe
+    #' 
+    #' @param dataframe
+    #' @param gene_string
+    #' 
+    #' @return genes not in data
+    #' 
     bad_genes <- function(data, genes){
         
         genes <- strsplit(genes, "\n")
